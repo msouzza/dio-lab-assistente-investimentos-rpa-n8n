@@ -1,0 +1,670 @@
+{
+  "name": "Desafio Final",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "clientes",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        -160
+      ],
+      "id": "71143471-8bb1-45ea-a41d-bf386d279c7e",
+      "name": "Webhook",
+      "webhookId": "10c7a1b2-2cf6-4a82-84bb-b84824f17a67"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json}}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2240,
+        -176
+      ],
+      "id": "0f0cb001-8f0a-4915-b00c-2760084ceb9e",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "url": "https://digitalinnovationone.github.io/dio-lab-assistente-investimentos-rpa-n8n/data.csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        352,
+        -160
+      ],
+      "id": "7a653cdd-8251-4854-8e4f-dd3755a8b812",
+      "name": "Buscar CSV"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pega o CSV como texto vindo do HTTP Request\n\nconst csvRaw = $json.data ?? $json.body ?? $json;\n\nconst text = (typeof csvRaw === \"string\") ? csvRaw : JSON.stringify(csvRaw);\n\n\n\nconst lines = text.split(/\\r?\\n/).map(l => l.trim()).filter(Boolean);\n\nconst headers = lines[0].split(\",\").map(h => h.trim());\n\n\n\nconst investimentos = lines.slice(1).map(line => {\n\n  const cols = line.split(\",\").map(c => c.trim());\n\n  const obj = {};\n\n  headers.forEach((h, i) => obj[h] = cols[i] ?? \"\");\n\n\n\n  // normaliza mínimo para número\n\n  obj.minimo = Number(String(obj.minimo).replace(/[^\\d]/g, \"\")) || 0;\n\n\n\n  return obj;\n\n});\n\n\n\nreturn [{ json: { investimentos } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        -160
+      ],
+      "id": "e88c4ad0-2b77-4012-a466-24a1b99dde32",
+      "name": "Normalizar resultado CSV"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        640,
+        -352
+      ],
+      "id": "671b966e-d83c-4de3-b73a-8b8de38328dc",
+      "name": "Combinar os resultados"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Função de sorteio aleatório\nfunction pick(arr) {\n  if (!arr || arr.length === 0) return \"\";\n  const index = Math.floor(Math.random() * arr.length);\n  return arr[index];\n}\n\n// 2. Extrai os dados unificados que chegaram do nó anterior\nconst itemEntrada = $input.first().json;\nconst clientes = itemEntrada.body?.clientes || [];\nconst investimentos = itemEntrada.investimentos || [];\n\n// 3. Processa cada cliente\nconst resultados = clientes.map(c => {\n  const perfil = c.perfil;\n\n  // Normaliza o saldo brasileiro: \"R$ 12.500,00\" -> 12500\n  const saldoLimpo = String(c.saldo || \"\")\n    .replace(/[R$\\s]/g, \"\")\n    .replace(/\\./g, \"\")\n    .replace(\",\", \".\");\n  const saldoNum = parseFloat(saldoLimpo) || 0;\n\n  // Filtra por perfil compatível e saldo suficiente\n  const compativeis = investimentos.filter(inv => {\n    return inv.perfil.toLowerCase() === perfil.toLowerCase() && saldoNum >= inv.minimo;\n  });\n\n  // Se o cliente tem mais de R$ 1.000, descarta Poupança/ativos básicos se houver opção melhor\n  const opcoesSemPoupanca = compativeis.filter(inv => inv.produto.toLowerCase() !== \"poupança\");\n  const opcoesValidas = (opcoesSemPoupanca.length > 0) ? opcoesSemPoupanca : compativeis;\n\n  // Seleciona o investimento de maior valor mínimo compatível com o saldo\n  const escolhido = opcoesValidas.length > 0 \n    ? opcoesValidas.sort((a, b) => b.minimo - a.minimo)[0] \n    : null;\n\n  let motivo = \"\";\n  let mensagens = [];\n\n  if (escolhido) {\n    motivo = \"saldo_ok\";\n\n    // Formatação em Real (R$ 1.000,00)\n    const minimoTexto = Number(escolhido.minimo || 0).toLocaleString(\"pt-BR\", {\n      style: \"currency\",\n      currency: \"BRL\"\n    });\n\n    // As 3 variações exatas mostradas no painel da aula:\n    mensagens = [\n      `Olá ${c.nome}! Pelo seu perfil (${perfil}), uma boa opção é **${escolhido.produto}** (mínimo ${minimoTexto}). Com seu saldo atual (${c.saldo}), você já consegue investir. Rentabilidade: ${escolhido.rentabilidade}.`,\n      `Oi ${c.nome}! Recomendação para perfil ${perfil}: **${escolhido.produto}** (mínimo ${minimoTexto}). Seu saldo (${c.saldo}) já atende o mínimo. Rentabilidade: ${escolhido.rentabilidade}.`,\n      `${c.nome}, indo direto ao ponto: para o perfil ${perfil}, indicamos o produto **${escolhido.produto}** (mínimo ${minimoTexto}). Você possui ${c.saldo} em conta, o que viabiliza o aporte. Rentabilidade: ${escolhido.rentabilidade}.`\n    ];\n  } else {\n    motivo = \"saldo_insuficiente\";\n\n    mensagens = [\n      `Olá ${c.nome}! Analisamos seu perfil (${perfil}), mas no momento não encontramos opções disponíveis com aporte mínimo compatível com o seu saldo atual (${c.saldo}).`,\n      `Oi ${c.nome}! No momento você precisa de um saldo um pouco maior para acessar as opções disponíveis para o perfil ${perfil}. Continue acompanhando!`\n    ];\n  }\n\n  return {\n    nome: c.nome,\n    email: c.email,\n    perfil: perfil,\n    saldo_texto: c.saldo,\n    saldo_num: saldoNum,\n    recomendacao: escolhido,\n    motivo: motivo,\n    mensagens: mensagens,\n    mensagem_escolhida: pick(mensagens)\n  };\n});\n\n// 4. Retorno no formato exato da aula\nreturn [{\n  json: {\n    ok: true,\n    total_clientes: resultados.length,\n    total_investimentos: investimentos.length,\n    resultados: resultados\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        -160
+      ],
+      "id": "6538c1c3-db7b-4bb1-91bc-612ad0c72d78",
+      "name": "Normalizar os resultado combinados"
+    },
+    {
+      "parameters": {
+        "jsCode": "const resultados = $json.resultados || [];\n\nfunction parseBRL(valor) {\n  if (!valor) return 0;\n  const s = String(valor)\n    .replace(\"R$\", \"\")\n    .replace(/\\./g, \"\")\n    .replace(\",\", \".\")\n    .replace(/[^\\d.]/g, \"\")\n    .trim();\n  const n = Number(s);\n  return Number.isFinite(n) ? n : 0;\n}\n\n// Retorna UM ITEM por cliente\nconst out = resultados.map(c => {\n  const saldoNum = c.saldo_num ?? parseBRL(c.saldo_texto ?? c.saldo);\n\n  return {\n    json: {\n      email_to: String(c.email || \"\").trim(),\n      nome: String(c.nome || \"\").trim(),\n      perfil: c.perfil,\n      saldo_texto: c.saldo_texto ?? c.saldo,\n      saldo_num: saldoNum,\n      recomendacao: c.recomendacao,\n      motivo: c.motivo,\n      mensagem_base: c.mensagem_escolhida || c.mensagem || \"\",\n      copy_rules: {\n        idioma: \"pt-BR\",\n        tom: \"amigável e profissional\",\n        tamanho: \"curto (4-6 linhas)\",\n        evitar: [\"promessas de ganho\", \"garantias\", \"linguagem agressiva\"]\n      }\n    }\n  };\n});\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        -160
+      ],
+      "id": "ab0b87ac-fc93-4b74-9a78-20992fe9d230",
+      "name": "Normalizar a recomendação"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Obtém o texto gerado pelo Groq\nconst textoBruto = $json.output?.[0]?.content?.[0]?.text \n  || $json.text \n  || $json.content \n  || \"\";\n\nconst jsonLimpo = textoBruto.replace(/```json/gi, \"\").replace(/```/g, \"\").trim();\n\nlet emailFormatado = {};\ntry {\n  emailFormatado = JSON.parse(jsonLimpo);\n} catch (e) {\n  emailFormatado = {\n    subject: \"Sugestão de Investimento\",\n    text_body: textoBruto,\n    html_body: `<p>${textoBruto.replace(/\\n/g, \"<br/>\")}</p>`\n  };\n}\n\n// Em vez de $('Nome'), usamos o histórico de execução do item atual:\n// Pega o item do nó de onde o Groq recebeu os dados:\nconst dadosEntrada = $input.item.json;\n\nreturn {\n  json: {\n    to: dadosEntrada.email_to || dadosEntrada.email || \"\",\n    nome: dadosEntrada.nome || \"\",\n    subject: emailFormatado.subject,\n    text_body: emailFormatado.text_body,\n    html_body: emailFormatado.html_body\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        -160
+      ],
+      "id": "20be01fe-73c6-4b9d-b610-cac08524eaad",
+      "name": "Normalizar o resultado da IA"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "91b214ca-375a-4d26-a938-dd0d6ce5b69e",
+              "leftValue": "={{ $json.to }}",
+              "rightValue": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1760,
+        -160
+      ],
+      "id": "ea75956a-f08e-42f9-9643-4c41f1b6e876",
+      "name": "Verificação de email válido - REGEX"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.html_body }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2000,
+        -176
+      ],
+      "id": "a09c76d3-905c-4c0e-bfea-82ff3db095cb",
+      "name": "Enviar email",
+      "webhookId": "3a11886d-0122-4191-a804-9f4c29565cad"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "openai/gpt-oss-120b",
+          "mode": "list",
+          "cachedResultName": "OPENAI/GPT-OSS-120B"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=Escreva um e-mail curto em pt-BR para o cliente abaixo, seguindo rigorosamente as restrições:\n- Tom: {{ $json.copy_rules.tom }}\n- Tamanho: {{ $json.copy_rules.tamanho }}\n- Restrições: Não prometa ganhos fixos, não dê garantias e evite linguagem agressiva.\n\nCliente: \"{{ $json.nome }}\"\nPerfil: \"{{ $json.perfil }}\"\nSaldo: \"{{ $json.saldo_texto }}\"\n\nRecomendação:\nProduto: \"{{ $json.recomendacao?.produto || 'Nenhum no momento' }}\"\nMínimo: \"{{ $json.recomendacao?.minimo || 0 }}\"\nRentabilidade: \"{{ $json.recomendacao?.rentabilidade || 'N/A' }}\"\nMotivo: \"{{ $json.motivo }}\"\nMensagem Base: \"{{ $json.mensagem_base }}\"\n\nRetorne APENAS um objeto JSON válido (sem blocos ```json ou marcações Markdown fora do JSON) com a seguinte estrutura:\n{\n  \"subject\": \"Assunto do e-mail aqui\",\n  \"text_body\": \"Corpo da mensagem em texto puro...\",\n  \"html_body\": \"<p>Corpo da mensagem formatado em HTML...</p>\"\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "store": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        1200,
+        -160
+      ],
+      "id": "55c13e86-ac1f-456b-94d0-67c4237bd76d",
+      "name": "Gerar modelo de email - IA Generativa",
+      "credentials": {
+        "openAiApi": {
+          "id": "fNdunXAbGNbVV45e",
+          "name": "Groq OpenAi"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "aerospace-sunset-back-intention.trycloudflare.com",
+            "user-agent": "python-requests/2.32.4",
+            "content-length": "1047",
+            "accept": "*/*",
+            "accept-encoding": "gzip",
+            "cdn-loop": "cloudflare; loops=1; subreqs=1",
+            "cf-connecting-ip": "34.141.192.57",
+            "cf-ew-via": "15",
+            "cf-ipcountry": "NL",
+            "cf-ray": "a4d1f8f718a56563-GIG",
+            "cf-visitor": "{\"scheme\":\"https\"}",
+            "cf-warp-tag-id": "e5ecb714-8677-4c66-94d7-4996afcf5eac",
+            "cf-worker": "trycloudflare.com",
+            "connection": "keep-alive",
+            "content-type": "application/json",
+            "x-forwarded-for": "34.141.192.57",
+            "x-forwarded-proto": "https"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "clientes": [
+              {
+                "nome": "Ana Silva",
+                "email": "ana@email.com",
+                "saldo": "R$ 12.500,00",
+                "perfil": "Conservador"
+              },
+              {
+                "nome": "Bruno Lima",
+                "email": "bruno@email.com",
+                "saldo": "R$ 3.200,00",
+                "perfil": "Moderado"
+              },
+              {
+                "nome": "Carla Souza",
+                "email": "carla@email.com",
+                "saldo": "R$ 28.900,00",
+                "perfil": "Arrojado"
+              },
+              {
+                "nome": "Daniel Oliveira",
+                "email": "daniel@email.com",
+                "saldo": "R$ 850,00",
+                "perfil": "Conservador"
+              },
+              {
+                "nome": "Elena Rodrigues",
+                "email": "elena@email.com",
+                "saldo": "R$ 45.000,00",
+                "perfil": "Arrojado"
+              },
+              {
+                "nome": "Felipe Santos",
+                "email": "felipe@email.com",
+                "saldo": "R$ 7.800,00",
+                "perfil": "Moderado"
+              },
+              {
+                "nome": "Gabriela Costa",
+                "email": "gabriela@email.com",
+                "saldo": "R$ 1.500,00",
+                "perfil": "Conservador"
+              },
+              {
+                "nome": "Henrique Alves",
+                "email": "henrique@email.com",
+                "saldo": "R$ 22.300,00",
+                "perfil": "Moderado"
+              },
+              {
+                "nome": "Isabela Martins",
+                "email": "isabela@email.com",
+                "saldo": "R$ 500,00",
+                "perfil": "Conservador"
+              },
+              {
+                "nome": "João Pereira",
+                "email": "joao@email.com",
+                "saldo": "R$ 15.000,00",
+                "perfil": "Arrojado"
+              }
+            ]
+          },
+          "webhookUrl": "http://localhost:5678/webhook-test/clientes",
+          "executionMode": "test"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ],
+    "Gerar modelo de email - IA Generativa": [
+      {
+        "json": {
+          "output": [
+            {
+              "type": "message",
+              "id": "msg_01m5at1skyedmb2garc1gx0sh4",
+              "status": "completed",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "{\n  \"subject\": \"Sugestão de investimento para seu perfil\",\n  \"text_body\": \"Olá Ana Silva!\\n\\nPelo seu perfil conservador, recomendamos o CDB Liquidez Diária, com investimento mínimo de R$ 1.000,00. Com seu saldo atual de R$ 12.500,00, você já pode aplicar. A rentabilidade estimada é de 12,5% ao ano, sujeita às condições de mercado. Estamos à disposição para esclarecer dúvidas.\",\n  \"html_body\": \"<p>Olá Ana Silva!</p><p>Pelo seu perfil conservador, recomendamos o <strong>CDB Liquidez Diária</strong>, com investimento mínimo de R$ 1.000,00. Com seu saldo atual de R$ 12.500,00, você já pode aplicar.</p><p>A rentabilidade estimada é de 12,5% ao ano, sujeita às condições de mercado.</p><p>Estamos à disposição para esclarecer dúvidas.</p>\"\n}",
+                  "annotations": [],
+                  "logprobs": null
+                }
+              ]
+            }
+          ]
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      },
+      {
+        "json": {
+          "output": [
+            {
+              "type": "message",
+              "id": "msg_01m5at1v4neep91n2m0w5y4vgh",
+              "status": "completed",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "{\n  \"subject\": \"Sugestão de investimento para você, Bruno\",\n  \"text_body\": \"Olá Bruno Lima!\\nPelo seu perfil Moderado, sugerimos o CDB Prefixado, com investimento mínimo de R$ 1.000,00.\\nCom o saldo de R$ 3.200,00 você já pode aplicar e aproveitar a rentabilidade de 14,0% ao ano.\\nQualquer dúvida, estou à disposição.\",\n  \"html_body\": \"<p>Olá Bruno Lima!</p><p>Pelo seu perfil Moderado, sugerimos o CDB Prefixado, com investimento mínimo de R$ 1.000,00.</p><p>Com o saldo de R$ 3.200,00 você já pode aplicar e aproveitar a rentabilidade de 14,0% ao ano.</p><p>Qualquer dúvida, estou à disposição.</p>\"\n}",
+                  "annotations": [],
+                  "logprobs": null
+                }
+              ]
+            }
+          ]
+        },
+        "pairedItem": {
+          "item": 1
+        }
+      },
+      {
+        "json": {
+          "output": [
+            {
+              "type": "message",
+              "id": "msg_01m5at1wj3ewnb4erfm1dfbskq",
+              "status": "completed",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "{\n  \"subject\": \"Recomendação de Fundo de Ações para seu perfil Arrojado\",\n  \"text_body\": \"Oi Carla Souza,\\n\\nCom base no seu perfil arrojado, sugerimos o Fundo de Ações, cujo investimento mínimo é de R$ 10.000,00. Seu saldo de R$ 28.900,00 já atende a esse requisito. A rentabilidade é variável e depende das condições do mercado.\\n\\nQualquer dúvida, estou à disposição.\",\n  \"html_body\": \"<p>Oi Carla Souza,</p><p>Com base no seu perfil arrojado, sugerimos o <strong>Fundo de Ações</strong>, cujo investimento mínimo é de R$ 10.000,00. Seu saldo de R$ 28.900,00 já atende a esse requisito. A rentabilidade é variável e depende das condições do mercado.</p><p>Qualquer dúvida, estou à disposição.</p>\"\n}",
+                  "annotations": [],
+                  "logprobs": null
+                }
+              ]
+            }
+          ]
+        },
+        "pairedItem": {
+          "item": 2
+        }
+      },
+      {
+        "json": {
+          "output": [
+            {
+              "type": "message",
+              "id": "msg_01m5at1y30enprjkt1gwd2ggee",
+              "status": "completed",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "{\n  \"subject\": \"Recomendação de investimento para seu perfil conservador\",\n  \"text_body\": \"Olá Daniel Oliveira,\\nAnalisando seu perfil conservador e o saldo de R$ 850,00, recomendamos o Tesouro Selic (aplicação mínima de R$ 500,00).\\nEsse título tem apresentado rentabilidade em torno de 13,0% ao ano, de acordo com a taxa Selic.\\nLembre-se de que os rendimentos podem variar e não há garantia de retorno.\\nCaso tenha dúvidas, estou à disposição.\",\n  \"html_body\": \"<p>Olá Daniel Oliveira,</p><p>Analisando seu perfil conservador e o saldo de R$ 850,00, recomendamos o Tesouro Selic (aplicação mínima de R$ 500,00).</p><p>Esse título tem apresentado rentabilidade em torno de 13,0% ao ano, de acordo com a taxa Selic.</p><p>Lembre-se de que os rendimentos podem variar e não há garantia de retorno.</p><p>Caso tenha dúvidas, estou à disposição.</p>\"\n}",
+                  "annotations": [],
+                  "logprobs": null
+                }
+              ]
+            }
+          ]
+        },
+        "pairedItem": {
+          "item": 3
+        }
+      },
+      {
+        "json": {
+          "output": [
+            {
+              "type": "message",
+              "id": "msg_01m5at1zm6ey8bca6s7vkt6nm6",
+              "status": "completed",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "{\n  \"subject\": \"Recomendação de investimento para seu perfil Arrojado\",\n  \"text_body\": \"Oi Elena Rodrigues!\\nRecomendamos o Fundo de Ações (mínimo R$ 10.000,00) para seu perfil Arrojado.\\nSeu saldo de R$ 45.000,00 já atende ao requisito.\\nA rentabilidade é variável e depende do mercado.\\nEstou à disposição para esclarecer qualquer dúvida.\",\n  \"html_body\": \"<p>Oi Elena Rodrigues!</p><p>Recomendamos o Fundo de Ações (mínimo R$ 10.000,00) para seu perfil Arrojado.</p><p>Seu saldo de R$ 45.000,00 já atende ao requisito.</p><p>A rentabilidade é variável e depende do mercado.</p><p>Estou à disposição para esclarecer qualquer dúvida.</p>\"\n}",
+                  "annotations": [],
+                  "logprobs": null
+                }
+              ]
+            }
+          ]
+        },
+        "pairedItem": {
+          "item": 4
+        }
+      },
+      {
+        "json": {
+          "output": [
+            {
+              "type": "message",
+              "id": "msg_01m5at2166e2yv4rhj5v19k1hq",
+              "status": "completed",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "{\n  \"subject\": \"Recomendação de investimento para você, Felipe\",\n  \"text_body\": \"Olá Felipe, tudo bem?\\nPara o seu perfil moderado, sugerimos o Fundo Multimercado, com aporte mínimo de R$ 5.000,00.\\nSeu saldo atual de R$ 7.800,00 permite realizar esse investimento.\\nO fundo apresenta histórico de rentabilidade em torno de 16,0% ao ano.\\nCaso tenha dúvidas ou queira conversar, estou à disposição.\",\n  \"html_body\": \"<p>Olá Felipe, tudo bem?</p><p>Para o seu perfil moderado, sugerimos o Fundo Multimercado, com aporte mínimo de R$ 5.000,00.</p><p>Seu saldo atual de R$ 7.800,00 permite realizar esse investimento.</p><p>O fundo apresenta histórico de rentabilidade em torno de 16,0% ao ano.</p><p>Caso tenha dúvidas ou queira conversar, estou à disposição.</p>\"\n}",
+                  "annotations": [],
+                  "logprobs": null
+                }
+              ]
+            }
+          ]
+        },
+        "pairedItem": {
+          "item": 5
+        }
+      },
+      {
+        "json": {
+          "output": [
+            {
+              "type": "message",
+              "id": "msg_01m5at22qmey4t9fddz1k7byf1",
+              "status": "completed",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "{\n  \"subject\": \"Recomendação de investimento para seu perfil conservador\",\n  \"text_body\": \"Olá Gabriela Costa,\\nConforme seu perfil conservador, indicamos o CDB Liquidez Diária (investimento a partir de R$ 1.000,00).\\nSeu saldo de R$ 1.500,00 já atende ao valor mínimo exigido.\\nO produto oferece rentabilidade de 12,5% ao ano, com liquidez diária.\\nCaso queira mais detalhes, estou à disposição.\",\n  \"html_body\": \"<p>Olá Gabriela Costa,</p><p>Conforme seu perfil conservador, indicamos o <strong>CDB Liquidez Diária</strong> (investimento a partir de R$ 1.000,00).</p><p>Seu saldo de R$ 1.500,00 já atende ao valor mínimo exigido.</p><p>O produto oferece rentabilidade de 12,5% ao ano, com liquidez diária.</p><p>Caso queira mais detalhes, estou à disposição.</p>\"\n}",
+                  "annotations": [],
+                  "logprobs": null
+                }
+              ]
+            }
+          ]
+        },
+        "pairedItem": {
+          "item": 6
+        }
+      },
+      {
+        "json": {
+          "output": [
+            {
+              "type": "message",
+              "id": "msg_01m5at241ket38gtp654vh8h0f",
+              "status": "completed",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "{\n  \"subject\": \"Recomendação de investimento para seu perfil\",\n  \"text_body\": \"Oi Henrique Alves,\\nCom base no seu perfil Moderado, sugerimos o Fundo Multimercado (aplicação mínima de R$ 5.000,00).\\nSeu saldo atual de R$ 22.300,00 atende a esse requisito.\\nO fundo tem histórico de rentabilidade em torno de 16,0% ao ano.\\nCaso queira saber mais, estamos à disposição.\",\n  \"html_body\": \"<p>Oi Henrique Alves,</p><p>Com base no seu perfil Moderado, sugerimos o <strong>Fundo Multimercado</strong> (aplicação mínima de R$ 5.000,00).</p><p>Seu saldo atual de R$ 22.300,00 atende a esse requisito.</p><p>O fundo tem histórico de rentabilidade em torno de 16,0% ao ano.</p><p>Caso queira saber mais, estamos à disposição.</p>\"\n}",
+                  "annotations": [],
+                  "logprobs": null
+                }
+              ]
+            }
+          ]
+        },
+        "pairedItem": {
+          "item": 7
+        }
+      },
+      {
+        "json": {
+          "output": [
+            {
+              "type": "message",
+              "id": "msg_01m5at25j9e2hrf031rmg6khzv",
+              "status": "completed",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "{\n  \"subject\": \"Sugestão de investimento para seu perfil conservador\",\n  \"text_body\": \"Olá Isabela Martins,\\nConforme seu perfil conservador, o Tesouro Selic pode ser adequado para você.\\nO investimento tem valor mínimo de R$ 500,00, que corresponde ao seu saldo atual.\\nA rentabilidade histórica está próxima de 13,0% ao ano, sem garantias de desempenho futuro.\\nCaso queira mais detalhes, estou à disposição.\",\n  \"html_body\": \"<p>Olá Isabela Martins,</p><p>Conforme seu perfil conservador, o Tesouro Selic pode ser adequado para você.</p><p>O investimento tem valor mínimo de R$ 500,00, que corresponde ao seu saldo atual.</p><p>A rentabilidade histórica está próxima de 13,0% ao ano, sem garantias de desempenho futuro.</p><p>Caso queira mais detalhes, estou à disposição.</p>\"\n}",
+                  "annotations": [],
+                  "logprobs": null
+                }
+              ]
+            }
+          ]
+        },
+        "pairedItem": {
+          "item": 8
+        }
+      },
+      {
+        "json": {
+          "output": [
+            {
+              "type": "message",
+              "id": "msg_01m5at274pep2tc8thngmvmtw1",
+              "status": "completed",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "{\n  \"subject\": \"Sugestão de investimento para seu perfil Arrojado\",\n  \"text_body\": \"Olá João Pereira!\\nPelo seu perfil (Arrojado), uma boa opção é Fundo de Ações (mínimo R$ 10.000,00).\\nCom seu saldo atual (R$ 15.000,00), você já pode investir.\\nA rentabilidade é variável e depende do desempenho do mercado.\\nCaso tenha dúvidas, estou à disposição.\",\n  \"html_body\": \"<p>Olá João Pereira!</p><p>Pelo seu perfil (Arrojado), uma boa opção é Fundo de Ações (mínimo R$ 10.000,00).</p><p>Com seu saldo atual (R$ 15.000,00), você já pode investir.</p><p>A rentabilidade é variável e depende do desempenho do mercado.</p><p>Caso tenha dúvidas, estou à disposição.</p>\"\n}",
+                  "annotations": [],
+                  "logprobs": null
+                }
+              ]
+            }
+          ]
+        },
+        "pairedItem": {
+          "item": 9
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Buscar CSV",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Combinar os resultados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook": {
+      "main": [
+        []
+      ]
+    },
+    "Buscar CSV": {
+      "main": [
+        [
+          {
+            "node": "Normalizar resultado CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar resultado CSV": {
+      "main": [
+        [
+          {
+            "node": "Combinar os resultados",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Combinar os resultados": {
+      "main": [
+        [
+          {
+            "node": "Normalizar os resultado combinados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar os resultado combinados": {
+      "main": [
+        [
+          {
+            "node": "Normalizar a recomendação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar a recomendação": {
+      "main": [
+        [
+          {
+            "node": "Gerar modelo de email - IA Generativa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar o resultado da IA": {
+      "main": [
+        [
+          {
+            "node": "Verificação de email válido - REGEX",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificação de email válido - REGEX": {
+      "main": [
+        [
+          {
+            "node": "Enviar email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar email": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar modelo de email - IA Generativa": {
+      "main": [
+        [
+          {
+            "node": "Normalizar o resultado da IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "1b1cd983-d30a-4a22-b560-e3b5f9ba543e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ee2269996bee3e18a9a84730f69d9857cbb8293b96a68facae78213d71acbf36"
+  },
+  "id": "BnoUWKz2AUePZI1E",
+  "tags": []
+}
