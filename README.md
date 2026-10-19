@@ -202,7 +202,7 @@ Projeto desenvolvido como parte do laboratório da DIO para automação de recom
 
 ## 📸 Demonstração do Fluxo
 
-![Execução do Fluxo](docs/evidencias/execucao_n8n.png)
+![Execução do Fluxo](docs/)
 
 ---
 
