@@ -170,3 +170,48 @@ Conecte o Agente de IA do N8N a um modelo como Gemini ou GPT para:
 **Bons estudos e mãos à obra** 🚀
 
 Se tiver dúvidas, lembre-se: a melhor forma de aprender é experimentando. Erre, corrija e celebre cada pequena vitória no caminho.
+
+
+# Meu processo de implementação do desafio e ao final como executar utilizado docker com n8n self-hosted
+# Assistente de Investimentos com RPA e n8n (Desafio Completo)
+
+Projeto desenvolvido como parte do laboratório da DIO para automação de recomendações de investimentos personalizadas via RPA, orquestração no n8n e geração dinâmica por Inteligência Artificial.
+
+---
+
+## 🚀 Arquitetura e Decisões Técnicas
+
+1. **Camada de Extração (RPA):**
+   - Script em Python utilizando `requests` e `BeautifulSoup` para raspagem da tabela HTML de clientes.
+   - Envio dos dados estruturados via requisição HTTP POST para o endpoint do Webhook do n8n.
+
+2. **Exposição Segura (Túnel):**
+   - Utilização do **Cloudflare Tunnels (`cloudflared`)** para expor com segurança o container Docker local do n8n para a internet (permitindo o consumo seguro a partir do Google Colab sem necessidade de IP fixo).
+
+3. **Orquestração e Regras de Negócio (n8n):**
+   - **Parser de Dados:** Conversão e normalização de strings de moeda no padrão brasileiro (`R$ X.XXX,XX`) para ponto flutuante (`float`).
+   - **Motor de Filtragem:** Cruzamento do perfil de risco e saldo disponível de cada cliente com o catálogo de investimentos (`data.csv`), descartando opções fora do aporte mínimo.
+   - **Desmembramento de Itens:** Separação do payload em itens individuais para execução paralela na esteira de IA.
+
+4. **Agente de IA (LLM via Groq):**
+   - Provedor: **Groq API** (modelo `llama-3.3-70b-versatile` / `llama-3.1-8b-instant`) devido à velocidade de inferência e custo-benefício.
+   - Engenharia de Prompt: Aplicação estrita de `copy_rules` (tom profissional, brevidade e restrição explícita contra promessas de ganhos garantidos).
+   - Formato de Saída: Forçamento de resposta em formato JSON contendo `subject`, `text_body` e `html_body` prontos para envio.
+
+---
+
+## 📸 Demonstração do Fluxo
+
+![Execução do Fluxo](docs/evidencias/execucao_n8n.png)
+
+---
+
+## 🛠️ Como Executar Localmente
+
+1. Suba o n8n via Docker:
+   ```bash
+   docker run -d --name n8n -p 5678:5678 -v n8n_data:/home/node/.n8n docker.n8n.io/n8nio/n8n
+
+
+
+
